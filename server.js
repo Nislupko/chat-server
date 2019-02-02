@@ -1,7 +1,7 @@
 const app = require('http').createServer(handler)
 const io = require('socket.io')(app);
 const mysql = require('mysql');
-const config = require('./config-heroku')
+const config = require('./config')
 const port = 4000;
 
 function handler (req, res) {
@@ -14,10 +14,12 @@ con.query(`TRUNCATE chat_user`, function(err){
     if(err) console.log(`Error with TRUNCATE`)
 })
 
+let clients = {}
 io.on('connection', function (socket) {
     socket.on('initial', function (data) {
         const userName = JSON.stringify(data).match(/[^"\\]+/)[0]
         socket['userName'] = userName
+        clients[socket.id]=socket
         const sql_insert_new_user = `INSERT INTO chat_user(name) VALUES('${userName}')`
         con.query(sql_insert_new_user, function (err) {
             if (err) {
@@ -75,7 +77,7 @@ io.on('connection', function (socket) {
     socket.on('new_entry', function (data) {
         const request = JSON.parse(data)
         const sql_update_user = `UPDATE chat_user SET room=${request.room} WHERE name='${request.user}'`
-        con.query(sql_update_user, function (err, message) {
+        con.query(sql_update_user, function (err) {
             if (err) console.log(`Error with ${sql_update_user}`)
         })
         const sql_select = `SELECT author,content,date FROM chat_message WHERE room=${request.room}`
@@ -84,11 +86,17 @@ io.on('connection', function (socket) {
             const sql_select_users = `SELECT name FROM chat_user WHERE room=${request.room}`
             con.query(sql_select_users, function (err2, users_in_room) {
                 if (err2) console.log(`Error with ${sql_select_users}`);
-                socket.emit('new_message', JSON.stringify({messages: messages}))
-                io.sockets.emit('new_entry', JSON.stringify({users: users_in_room}))
+                for (let key in clients){
+                    if (users_in_room.some(person=>{
+                        return person.name===clients[key].userName
+                    })) {
+                        clients[key].emit('new_entry', JSON.stringify({users: users_in_room}))
+                    }
+                }
+                socket.emit('new_message',JSON.stringify({messages:messages}))
             })
         })
-    });
+    })
     socket.on('exit_room', function (data) {
         const request = JSON.parse(data)
         //Удаляем пользователя из списка участников чат-комнаты
@@ -97,11 +105,16 @@ io.on('connection', function (socket) {
             if (err) console.log(`Error with ${sql_update_user}`)
         });
         //Оповещаем всех участников комнаты о новом составе комнаты
-        const sql_select_users_in_room = `SELECT name FROM chat_user WHERE room=${request.room}`
-        con.query(sql_select_users_in_room, function (err, message) {
-            if (err) console.log(`Error with ${sql_select_users_in_room}`);
-            const response = JSON.stringify({users: message})
-            io.sockets.emit("new_entry", response)
+        const sql_select_users = `SELECT name FROM chat_user WHERE room=${request.room}`
+        con.query(sql_select_users, function (err2, users_in_room) {
+            if (err2) console.log(`Error with ${sql_select_users}`);
+            for (let key in clients){
+                if (users_in_room.some(person=>{
+                    return person.name===clients[key].userName
+                })) {
+                    clients[key].emit('new_entry', JSON.stringify({users: users_in_room}))
+                }
+            }
         })
     })
     socket.on('create_message', function (data) {
@@ -116,8 +129,18 @@ io.on('connection', function (socket) {
         const sql_select = `SELECT author,content,date FROM chat_message WHERE room=${request.room}`
         con.query(sql_select, function (err, messages) {
             if (err) console.log(`Error with ${sql_select}`)
-            io.sockets.emit('new_message', JSON.stringify({messages: messages}))
-        });
+            const sql_select_users = `SELECT name FROM chat_user WHERE room=${request.room}`
+            con.query(sql_select_users, function (err2, users_in_room) {
+                if (err2) console.log(`Error with ${sql_select_users}`);
+                for (let key in clients){
+                    if (users_in_room.some(person=>{
+                        return person.name===clients[key].userName
+                    })) {
+                        clients[key].emit('new_message', JSON.stringify({messages: messages}))
+                    }
+                }
+            })
+        })
     })
     socket.on('disconnect', function () {
         if (socket.userName) {
@@ -132,10 +155,16 @@ io.on('connection', function (socket) {
                 });
                 if (room) {
                     //удаляем из комнаты, оповещаем всех оставшихся
-                    const sql_select_users_in_room = `SELECT name FROM chat_user WHERE room=${room}`
-                    con.query(sql_select_users_in_room, function (err, users) {
-                        if (err) console.log(`Error with ${sql_select_users_in_room}`);
-                        io.sockets.emit('new_entry', JSON.stringify({users: users}))
+                    const sql_select_users = `SELECT name FROM chat_user WHERE room=${room}`
+                    con.query(sql_select_users, function (err2, users_in_room) {
+                        if (err2) console.log(`Error with ${sql_select_users}`);
+                        for (let key in clients){
+                            if (users_in_room.some(person=>{
+                                return person.name===clients[key].userName
+                            })) {
+                                clients[key].emit('new_entry', JSON.stringify({users: users_in_room}))
+                            }
+                        }
                     })
                 }
             })
