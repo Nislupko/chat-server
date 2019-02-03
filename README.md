@@ -1,6 +1,4 @@
-##Installation
-
-## Available Scripts
+## Installation
 
 In the project directory, you can run:
 
@@ -13,4 +11,3 @@ Server must have connection with MySQL-database. You can create your own localho
 Anyway, you can use connection with database deployed to Heroku. This config is used by default. This way it's not necessary to install MySQL.<br>
 
 Note, you have to install [Client](https://github.com/Nislupko/chat-client) to use chat application
-Enjoy :)
